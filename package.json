@@ -1,0 +1,15 @@
+{
+  "name": "openmoba",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.6.5",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:server": "pnpm --filter @openmoba/server dev",
+    "test:server": "pnpm --filter @openmoba/server test",
+    "build:server": "pnpm --filter @openmoba/server build"
+  }
+}

@@ -1,0 +1,46 @@
+# Node.js
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Logs
+logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Three.js / assets
+assets/
+static/
+public/
+# if using webpack or similar
+webpack.config.js
+vite.config.js
+rollup.config.js
+# Misc
+.coverage
+nyc_output/
+.nyc_output

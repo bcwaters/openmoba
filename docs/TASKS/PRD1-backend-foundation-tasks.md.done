@@ -1,0 +1,45 @@
+# PRD 1: Backend Foundation and Room Runtime
+
+## Decomposed Iterative Tasks
+
+- [x] Set up project structure
+   - [x] Create apps/server directory
+   - [x] Initialize TypeScript configuration
+   - [x] Set up package.json with required dependencies (Colyseus, Express)
+
+- [x] Implement service bootstrapping
+   - [x] Create main server entry point
+   - [x] Implement environment-based port configuration
+   - [x] Add startup error handling and logging
+
+- [x] Register Colyseus room
+   - [x] Define openmoba room class
+   - [x] Set room capacity to 10 players
+   - [x] Implement room discovery mechanism
+
+- [x] Implement session lifecycle
+   - [x] Handle client connection events
+   - [x] Manage player join/leave flows
+   - [x] Implement disconnect cleanup
+   - [x] Prepare structure for future reconnect logic
+
+- [x] Add HTTP health endpoint
+   - [x] Create /health route
+   - [x] Return success response for health checks
+   - [x] Ensure endpoint is accessible for monitoring
+
+- [x] Establish testability
+   - [x] Write automated test for health endpoint
+   - [x] Write test for room join capability
+   - [x] Set up test runner (Jest/Mocha)
+
+- [x] Ensure portability
+   - [x] Verify backend doesn't assume browser environment
+   - [x] Test compatibility with potential Electron client
+   - [x] Document transport/protocol layer
+
+- [x] Final verification
+   - [x] Confirm one-command local startup works
+   - [x] Verify build process succeeds
+   - [x] Validate room capacity enforcement
+   - [x] Check health endpoint responsiveness
