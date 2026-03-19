@@ -9,15 +9,24 @@ let camera = null;
 let targetMesh = null;
 let raycaster = new THREE.Raycaster();
 let mouse = new THREE.Vector2();
+let sendFireBulletFn = null;
 
-export function initInput(getPlayerMeshFn, getCameraFn, getTargetMeshFn) {
+export function initInput(getPlayerMeshFn, getCameraFn, getTargetMeshFn, fireBulletFn) {
     playerMesh = getPlayerMeshFn();
     camera = getCameraFn();
     targetMesh = getTargetMeshFn();
+    sendFireBulletFn = fireBulletFn;
     
     // Keyboard input
     window.addEventListener('keydown', (e) => {
         keysPressed[e.code] = true;
+        if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+            console.log('Camera:', camera.position.x, camera.position.y, camera.position.z);
+            console.log('Player:', playerMesh.position.x, playerMesh.position.y, playerMesh.position.z);
+        }
+        if (e.code === 'Space') {
+            sendFireBulletFn();
+        }
     });
     
     window.addEventListener('keyup', (e) => {
@@ -57,6 +66,14 @@ export function initInput(getPlayerMeshFn, getCameraFn, getTargetMeshFn) {
                 raycaster.ray.intersectPlane(plane, intersectPoint);
                 
                 if (!isNaN(intersectPoint.x) && !isNaN(intersectPoint.z)) {
+                    // Calculate direction to target
+                    const dx = intersectPoint.x - playerMesh.position.x;
+                    const dz = intersectPoint.z - playerMesh.position.z;
+                    
+                    // Rotate player to face target (Y axis rotation)
+                    const angle = Math.atan2(dz, dx);
+                    playerMesh.rotation.y = -angle - Math.PI / 2;
+                    
                     if (targetMesh) {
                         targetMesh.position.set(intersectPoint.x, 0.02, intersectPoint.z);
                         targetMesh.visible = true;

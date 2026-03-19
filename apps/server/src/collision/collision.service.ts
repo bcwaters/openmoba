@@ -3,15 +3,20 @@ import { Player } from "../models/Player";
 import { CollisionResult, PlayerCollisionBounds } from "./collision.model";
 
 export class CollisionService {
-  private static PLAYER_COLLISION_RADIUS = 1.0; // units
+  private static PLAYER_COLLISION_RADIUS = 4.5; // units (tripled from 1.5)
   
   private static obstacles: Obstacle[] = [];
+  private static players: Map<string, Player> = new Map();
 
   public static initializeObstacles(obstacles: Obstacle[]) {
     this.obstacles = obstacles;
   }
 
-  public static checkPlayerPosition(player: Player): CollisionResult {
+  public static setPlayers(players: Map<string, Player>) {
+    this.players = players;
+  }
+
+  public static checkPlayerPosition(player: Player, skipPlayerId?: string): CollisionResult {
     const playerBounds: PlayerCollisionBounds = {
       radius: this.PLAYER_COLLISION_RADIUS
     };
@@ -25,6 +30,7 @@ export class CollisionService {
       );
       
       if (result.collides) {
+        console.log(`[SPAWN COLLISION] ${player.id} spawning inside obstacle ${obstacle.id} at (${player.x.toFixed(1)}, ${player.z.toFixed(1)})`);
         return {
           ...result,
           obstacleId: obstacle.id
@@ -32,8 +38,25 @@ export class CollisionService {
       }
     }
     
-    // Check player-to-player collision would be handled separately
-    // in the movement validation logic
+    // Check player-to-player collision (skip self or specified player)
+    for (const [otherId, otherPlayer] of this.players) {
+      if (otherId === player.id || otherId === skipPlayerId) continue;
+      
+      const result = this.checkCircleVsCircle(
+        { x: player.x, z: player.z },
+        playerBounds.radius,
+        { x: otherPlayer.x, z: otherPlayer.z },
+        playerBounds.radius
+      );
+      
+      if (result.collides) {
+        console.log(`[SPAWN COLLISION] ${player.id} spawning on player ${otherId} at (${player.x.toFixed(1)}, ${player.z.toFixed(1)})`);
+        return {
+          ...result,
+          obstacleId: `player-${otherId}`
+        };
+      }
+    }
     
     return { collides: false };
   }
@@ -54,11 +77,109 @@ export class CollisionService {
       );
       
       if (result.collides) {
+        console.log(`[COLLISION] ${player.id} blocked by obstacle ${obstacle.id} at (${targetX.toFixed(1)}, ${targetZ.toFixed(1)})`);
         return {
           ...result,
           obstacleId: obstacle.id
         };
       }
+    }
+    
+    // Check player-to-player collision at target position (skip self)
+    for (const [otherId, otherPlayer] of this.players) {
+      if (otherId === player.id) continue;
+      
+      const result = this.checkCircleVsCircle(
+        { x: targetX, z: targetZ },
+        playerBounds.radius,
+        { x: otherPlayer.x, z: otherPlayer.z },
+        playerBounds.radius
+      );
+      
+      if (result.collides) {
+        console.log(`[COLLISION] ${player.id} blocked by player ${otherId} at (${targetX.toFixed(1)}, ${targetZ.toFixed(1)})`);
+        return {
+          ...result,
+          obstacleId: `player-${otherId}`
+        };
+      }
+    }
+    
+    return { collides: false };
+  }
+  
+  public static checkBulletPosition(bullet: { x: number; z: number }, ownerId?: string): CollisionResult {
+    const bulletRadius = 0.3; // smaller than player
+    
+    // Check against all obstacles
+    for (const obstacle of this.obstacles) {
+      const result = this.checkCircleVsAABB(
+        { x: bullet.x, z: bullet.z },
+        bulletRadius,
+        obstacle
+      );
+      
+      if (result.collides) {
+        return {
+          ...result,
+          obstacleId: obstacle.id
+        };
+      }
+    }
+    
+    // Check against all players (skip owner)
+    for (const [playerId, player] of this.players) {
+      if (playerId === ownerId) continue;
+      
+      const result = this.checkCircleVsCircle(
+        { x: bullet.x, z: bullet.z },
+        bulletRadius,
+        { x: player.x, z: player.z },
+        this.PLAYER_COLLISION_RADIUS
+      );
+      
+      if (result.collides) {
+        return {
+          ...result,
+          obstacleId: `player-${playerId}`
+        };
+      }
+    }
+    
+    return { collides: false };
+  }
+  
+  private static checkCircleVsCircle(
+    circle1: { x: number; z: number },
+    radius1: number,
+    circle2: { x: number; z: number },
+    radius2: number
+  ): CollisionResult {
+    const dx = circle2.x - circle1.x;
+    const dz = circle2.z - circle1.z;
+    const distanceSquared = dx * dx + dz * dz;
+    const combinedRadius = radius1 + radius2;
+    
+    if (distanceSquared < combinedRadius * combinedRadius) {
+      const distance = Math.sqrt(distanceSquared);
+      let normalX = 0;
+      let normalZ = 0;
+      
+      if (distance > 0) {
+        normalX = dx / distance;
+        normalZ = dz / distance;
+      } else {
+        // Players are at exact same position - push in any direction
+        normalX = 1;
+        normalZ = 0;
+      }
+      
+      return {
+        collides: true,
+        normalX,
+        normalZ,
+        penetrationDepth: combinedRadius - distance
+      };
     }
     
     return { collides: false };

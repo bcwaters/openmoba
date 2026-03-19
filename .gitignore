@@ -6,8 +6,8 @@ yarn-error.log*
 pnpm-debug.log*
 
 # Build outputs
-dist/
-build/
+**/dist/
+**/build/
 *.tsbuildinfo
 
 # Environment variables
@@ -16,10 +16,8 @@ build/
 !.env.example
 
 # Logs
-logs
-*.log
-
-# IDE
+**/logs
+*.log# IDE
 .vscode/
 .idea/
 *.suo
@@ -36,11 +34,10 @@ Thumbs.db
 assets/
 static/
 public/
-# if using webpack or similar
-webpack.config.js
+# if using webpack or similarwebpack.config.js
 vite.config.js
 rollup.config.js
 # Misc
-.coverage
-nyc_output/
-.nyc_output
+**/coverage
+**/nyc_output
+**/.nyc_output

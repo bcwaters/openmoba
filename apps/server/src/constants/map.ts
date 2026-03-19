@@ -13,16 +13,30 @@ export const MAP_BOUNDS = {
 
 export const OBSTACLES = [
   // Outer boundary walls
-  { id: "wall-north", x: 0, z: 100, width: 200, height: 10 }, // North wall
-  { id: "wall-south", x: 0, z: -100, width: 200, height: 10 }, // South wall
-  { id: "wall-east", x: 100, z: 0, width: 10, height: 200 }, // East wall
-  { id: "wall-west", x: -100, z: 0, width: 10, height: 200 }, // West wall
+  { id: "wall-north", x: 0, z: 100, width: 200, height: 10 },
+  { id: "wall-south", x: 0, z: -100, width: 200, height: 10 },
+  { id: "wall-east", x: 100, z: 0, width: 10, height: 200 },
+  { id: "wall-west", x: -100, z: 0, width: 10, height: 200 },
   
-  // Some internal obstacles for testing
-  { id: "obstacle-1", x: -20, z: 0, width: 15, height: 15 },
-  { id: "obstacle-2", x: 20, z: -30, width: 20, height: 20 },
-  { id: "obstacle-3", x: 40, z: 40, width: 10, height: 30 },
-  { id: "obstacle-4", x: -60, z: 20, width: 25, height: 10 },
+  // Maze walls - horizontal sections
+  { id: "wall-h1", x: -50, z: -20, width: 60, height: 8 },
+  { id: "wall-h2", x: 30, z: -20, width: 40, height: 8 },
+  { id: "wall-h3", x: -70, z: 20, width: 40, height: 8 },
+  { id: "wall-h4", x: 0, z: 30, width: 50, height: 8 },
+  { id: "wall-h5", x: 60, z: 40, width: 50, height: 8 },
+  { id: "wall-h6", x: -40, z: 60, width: 60, height: 8 },
+  { id: "wall-h7", x: 20, z: 70, width: 40, height: 8 },
+  { id: "wall-h8", x: -80, z: -50, width: 30, height: 8 },
+  { id: "wall-h9", x: 70, z: -60, width: 40, height: 8 },
+  
+  // Maze walls - vertical sections
+  { id: "wall-v1", x: -20, z: 0, width: 8, height: 40 },
+  { id: "wall-v2", x: 40, z: -40, width: 8, height: 50 },
+  { id: "wall-v3", x: -60, z: -40, width: 8, height: 30 },
+  { id: "wall-v4", x: 70, z: 0, width: 8, height: 40 },
+  { id: "wall-v5", x: -80, z: 50, width: 8, height: 40 },
+  { id: "wall-v6", x: -30, z: -70, width: 8, height: 40 },
+  { id: "wall-v7", x: 50, z: 60, width: 8, height: 30 },
 ];
 
 // Helper type for obstacle data

@@ -6,7 +6,19 @@ import * as THREE from 'three';
 // Initialize systems
 const three = initThree();
 const networking = initNetworking(three.getPlayerMesh, three.setObstacles);
-const input = initInput(three.getPlayerMesh, () => three.camera, three.getTargetMesh);
+const input = initInput(
+    three.getPlayerMesh, 
+    () => three.camera, 
+    three.getTargetMesh,
+    () => {
+        const mesh = three.getPlayerMesh();
+        if (mesh) {
+            const dirX = -Math.sin(mesh.rotation.y);
+            const dirZ = -Math.cos(mesh.rotation.y);
+            networking.fireBullet(dirX, dirZ);
+        }
+    }
+);
 
 const PLAYER_MODEL_URL = '/models/Robot.obj';
 const DEBUG_LOG_INTERVAL_MS = 10000;
@@ -69,6 +81,7 @@ async function loadPlayerModel() {
         // Replace the placeholder sphere with the real GLB character.
         // setPlayerVisual() handles removing the temporary placeholder and
         // attaching this model beneath the player root object.
+        playerModel.scale.set(3, 3, 3);
         three.setPlayerVisual(playerModel);
     } catch (error) {
         console.error('Failed to load player model:', error);
@@ -80,6 +93,7 @@ loadPlayerModel();
 // Main loop
 let lastTime = performance.now();
 let lastDebugBucket = -1;
+let initialCameraLog = true;
 function animate(time) {
     const deltaTime = (time - lastTime) / 1000;
     lastTime = time;
@@ -87,6 +101,14 @@ function animate(time) {
     // Update camera to follow player and fog of war
     const playerMesh = three.getPlayerMesh();
     if (playerMesh) {
+        if (initialCameraLog) {
+            console.log('Camera initial:', {
+                x: three.camera.position.x,
+                y: three.camera.position.y,
+                z: three.camera.position.z
+            });
+            initialCameraLog = false;
+        }
         // Debug logging is intentionally throttled with a modulo-style time bucket
         // so we can observe long-running state without flooding the console every frame.
         //
@@ -129,7 +151,7 @@ function animate(time) {
 
         if (three.getCameraFollowsPlayer()) {
             three.camera.position.x = playerMesh.position.x;
-            three.camera.position.z = playerMesh.position.z + 100;
+            three.camera.position.z = playerMesh.position.z + 60;
             three.camera.lookAt(playerMesh.position.x, 0, playerMesh.position.z);
         }
 

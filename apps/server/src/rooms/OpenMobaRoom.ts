@@ -1,6 +1,7 @@
 import { Client, Room } from "colyseus";
 import { MovementIntent } from "../messages/MovementIntent";
 import { Player } from "../models/Player";
+import { Bullet } from "../models/Bullet";
 import { MAP_BOUNDS, SPAWN_POSITIONS, OBSTACLES } from "../constants/map";
 import { VisionService } from "../vision/vision.service";
 import { CollisionService } from "../collision/collision.service";
@@ -10,6 +11,9 @@ export class OpenMobaRoom extends Room {
   private players: Map<string, Player> = new Map();
   // Store vision data for each player
   private visionData: Map<string, any> = new Map();
+  // Store bullets
+  private bullets: Map<string, Bullet> = new Map();
+  private bulletIdCounter = 0;
 
   // Simulation tick rate (20 times per second = 50ms per tick)
   private readonly TICK_RATE = 50; // milliseconds
@@ -30,6 +34,11 @@ export class OpenMobaRoom extends Room {
       this.onMessage("movement-intent", (client, message) => {
         this.handleMovementIntent(client, message);
       });
+      
+      // Handle bullet firing messages from clients
+      this.onMessage("fire-bullet", (client, message) => {
+        this.handleFireBullet(client, message);
+      });
 
       // Start the simulation loop
       this.startSimulation();
@@ -46,7 +55,7 @@ export class OpenMobaRoom extends Room {
       x: spawnPos.x,
       y: spawnPos.y, // ground level
       z: spawnPos.z,
-      speed: 6.0, // units per second
+      speed: 15.0, // units per second
       connected: true,
       teamId: "unassigned" // placeholder
     };
@@ -97,6 +106,36 @@ export class OpenMobaRoom extends Room {
     
     console.log(`Player ${client.sessionId} moving to`, validatedTarget);
   }
+  
+  private handleFireBullet(client: Client, message: any): void {
+    const player = this.players.get(client.sessionId);
+    if (!player) return;
+    
+    // Use player's movement direction or default to facing right
+    const dirX = message.dirX ?? player.dirX ?? 1;
+    const dirZ = message.dirZ ?? player.dirZ ?? 0;
+    
+    // Normalize if needed
+    const length = Math.sqrt(dirX * dirX + dirZ * dirZ);
+    const nx = length > 0 ? dirX / length : 1;
+    const nz = length > 0 ? dirZ / length : 0;
+    
+    const bulletId = `bullet-${this.bulletIdCounter++}`;
+    const bullet: Bullet = {
+      id: bulletId,
+      x: player.x,
+      y: 3,
+      z: player.z,
+      dirX: nx,
+      dirZ: nz,
+      speed: player.speed * 2, // twice player speed
+      ownerId: client.sessionId,
+      createdAt: Date.now()
+    };
+    
+    this.bullets.set(bulletId, bullet);
+    console.log(`Player ${client.sessionId} fired bullet ${bulletId} in direction (${nx.toFixed(2)}, ${nz.toFixed(2)})`);
+  }
 
   private startSimulation(): void {
     // Fixed-tick simulation loop
@@ -108,6 +147,9 @@ export class OpenMobaRoom extends Room {
   private updateSimulation(): void {
     const deltaTime = this.TICK_RATE / 1000; // Convert to seconds
     
+    // Update player list for collision detection
+    CollisionService.setPlayers(this.players);
+    
     // Update each player's position based on movement intent
     for (const [sessionId, player] of this.players.entries()) {
       // If player has a target, move towards it
@@ -117,6 +159,12 @@ export class OpenMobaRoom extends Room {
         const dz = player.targetZ - player.z;
         const distance = Math.sqrt(dx * dx + dz * dz);
         
+        // Store normalized direction for rendering (flipped for client orientation)
+        if (distance > 0.1) {
+          player.dirX = -dx / distance;
+          player.dirZ = -dz / distance;
+        }
+        
         // If we're close enough to target, snap to target and clear it
         if (distance < 0.1) {
           player.x = player.targetX;
@@ -124,6 +172,8 @@ export class OpenMobaRoom extends Room {
           player.targetX = undefined;
           player.targetY = undefined;
           player.targetZ = undefined;
+          player.dirX = undefined;
+          player.dirZ = undefined;
         } else {
           // Move towards target at player's speed
           const moveDistance = player.speed * deltaTime;
@@ -136,6 +186,9 @@ export class OpenMobaRoom extends Room {
               player.targetX = undefined;
               player.targetY = undefined;
               player.targetZ = undefined;
+              player.dirX = undefined;
+              player.dirZ = undefined;
+              console.log(`[MOVE] ${player.id} reached target (${player.x.toFixed(1)}, ${player.z.toFixed(1)})`);
             }
             // If collision, don't move and keep trying (or could implement sliding)
           } else {
@@ -156,12 +209,21 @@ export class OpenMobaRoom extends Room {
               connected: true
             };
             
-            const collisionResult = CollisionService.checkPlayerPosition(tempPlayer);
+            const collisionResult = CollisionService.checkPlayerPosition(tempPlayer, sessionId);
             if (!collisionResult.collides) {
               // Validate new position is within bounds and update if no collision
               const validatedPos = this.validatePosition({ x: newX, y: 0, z: newZ });
               player.x = validatedPos.x;
               player.z = validatedPos.z;
+              // Only log occasionally to avoid spam
+              if (Math.random() < 0.05) {
+                console.log(`[MOVE] ${player.id} moving to (${player.x.toFixed(1)}, ${player.z.toFixed(1)})`);
+              }
+            } else {
+              // Only log when blocked to avoid spam
+              if (Math.random() < 0.1) {
+                console.log(`[BLOCKED] ${player.id} at (${player.x.toFixed(1)}, ${player.z.toFixed(1)}) blocked by ${collisionResult.obstacleId}`);
+              }
             }
             // If collision, don't move this tick (could implement sliding later)
           }
@@ -169,11 +231,65 @@ export class OpenMobaRoom extends Room {
       }
     }
     
+    // Update bullet positions
+    this.updateBullets(deltaTime);
+    
     // Calculate vision for each player
     this.updateVisionData();
     
     // Broadcast updated state to clients (per-client filtering)
     this.broadcastPlayerPositions();
+    this.broadcastBullets();
+  }
+  
+  private updateBullets(deltaTime: number): void {
+    const toRemove: string[] = [];
+    const maxDistance = 500; // Remove bullets after traveling this far
+    
+    for (const [bulletId, bullet] of this.bullets.entries()) {
+      // Move bullet
+      bullet.x += bullet.dirX * bullet.speed * deltaTime;
+      bullet.z += bullet.dirZ * bullet.speed * deltaTime;
+      
+      // Check if bullet is out of bounds or too old
+      const age = Date.now() - bullet.createdAt;
+      const distFromOrigin = Math.sqrt(
+        Math.pow(bullet.x - (-80), 2) + Math.pow(bullet.z - (-80), 2)
+      );
+      
+      if (bullet.x < MAP_BOUNDS.minX || bullet.x > MAP_BOUNDS.maxX ||
+          bullet.z < MAP_BOUNDS.minZ || bullet.z > MAP_BOUNDS.maxZ ||
+          age > 5000) { // 5 second max lifetime
+        toRemove.push(bulletId);
+        continue;
+      }
+      
+      // Check bullet vs obstacles and players
+      const collisionResult = CollisionService.checkBulletPosition(bullet, bullet.ownerId);
+      if (collisionResult.collides) {
+        console.log(`[BULLET] ${bulletId} hit ${collisionResult.obstacleId}`);
+        toRemove.push(bulletId);
+      }
+    }
+    
+    // Remove expired/bad bullets
+    for (const id of toRemove) {
+      this.bullets.delete(id);
+    }
+  }
+  
+  private broadcastBullets(): void {
+    const bulletsArray = Array.from(this.bullets.values()).map(b => ({
+      id: b.id,
+      x: b.x,
+      y: b.y,
+      z: b.z,
+      dirX: b.dirX,
+      dirZ: b.dirZ,
+      ownerId: b.ownerId
+    }));
+    
+    this.broadcast("bullets", { bullets: bulletsArray });
   }
 
   private updateVisionData(): void {
@@ -262,17 +378,19 @@ export class OpenMobaRoom extends Room {
             x: otherPlayer.x,
             y: otherPlayer.y,
             z: otherPlayer.z,
-            connected: otherPlayer.connected
+            connected: otherPlayer.connected,
+            dirX: otherPlayer.dirX ?? 0,
+            dirZ: otherPlayer.dirZ ?? 0
           };
         }
 
         return null;
-      }).filter((player): player is { sessionId: string; x: number; y: number; z: number; connected: boolean } => 
+      }).filter((player): player is { sessionId: string; x: number; y: number; z: number; connected: boolean; dirX: number; dirZ: number } => 
                 player !== null);
 
-      this.send(client, "player-positions", { 
+      client.send("player-positions", { 
         players: filteredPlayersState, 
-        visibleRadius: 100.0,
+        visibleRadius: 50.0,
         obstacles: OBSTACLES
       });
     });

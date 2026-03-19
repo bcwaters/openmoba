@@ -1,41 +1,18 @@
 import * as THREE from 'three';
 import { Client as ColyseusClient } from 'colyseus.js';
-import { createPlayerModelRoot, loadAnimatedModel } from './three.js';
+import { loadObjModel } from './three.js';
 
 let client;
 let room;
 let connected = false;
 let playerId = null;
 let remotePlayers = new Map();
+let bullets = new Map();
 let getLocalPlayerMesh = null;
 let setObstaclesFn = null;
 let currentScene = null;
 // TODO: visibleRadius should be authoritative from server - refactor to remove hardcoded value
-let visibleRadius = 100.0;
-
-const PLAYER_MODEL_URL = '/models/Soldier.glb';
-
-let localModelLoaded = false;
-let remoteModelLoaded = false;
-let cachedRemoteModel = null;
-
-async function getRemotePlayerModel() {
-    if (cachedRemoteModel) {
-        const model = cachedRemoteModel.clone();
-        return createPlayerModelRoot(model);
-    }
-    
-    try {
-        const { loadAnimatedModel } = await import('./three.js');
-        cachedRemoteModel = await loadAnimatedModel(PLAYER_MODEL_URL, 'Walk');
-        // Match the local player's visual scale so remote players render as the
-        // same type of world-space character instead of an oversized imported asset.
-        cachedRemoteModel.scale.set(0.1, 0.1, 0.1);
-        return createPlayerModelRoot(cachedRemoteModel.clone());
-    } catch (e) {
-        return null;
-    }
-}
+let visibleRadius = 50.0;
 
 const INTENT_THROTTLE_MS = 100;
 let lastIntentTime = 0;
@@ -91,39 +68,35 @@ export function initNetworking(getLocalPlayerMeshArg, setObstaclesFnArg) {
                 }
                 
                 if (!remotePlayers.has(playerData.sessionId)) {
-                    let mesh = await getRemotePlayerModel();
-                    
-                    if (!mesh) {
-                        const geometry = new THREE.SphereGeometry(2.0, 12, 12);
-                        const material = new THREE.MeshStandardMaterial({ 
-                            color: 0xff0000,
-                            transparent: true,
-                            opacity: 1.0
+                    try {
+                        const wizardModel = await loadObjModel('/models/Wizard.obj');
+                        wizardModel.rotation.y = Math.PI;
+                        wizardModel.scale.set(5.46, 5.46, 5.46);
+                        wizardModel.traverse((child) => {
+                            if (child.isMesh) {
+                                child.castShadow = true;
+                                child.receiveShadow = true;
+                            }
                         });
-                        mesh = new THREE.Mesh(geometry, material);
+                        
+                        remotePlayers.set(playerData.sessionId, {
+                            id: playerData.sessionId,
+                            x: playerData.x,
+                            y: playerData.y,
+                            z: playerData.z,
+                            mesh: wizardModel
+                        });
+                        
+                        console.log(`Created remote player: ${playerData.sessionId}`);
+                        
+                        if (currentScene) {
+                            wizardModel.position.set(playerData.x, playerData.y, playerData.z);
+                            currentScene.add(wizardModel);
+                        }
+                    } catch (e) {
+                        console.error('Failed to load wizard model:', e);
                     }
-                    // The remote player object may be either a fallback primitive mesh
-                    // or a Group containing the imported GLB. Only primitive meshes have
-                    // a direct castShadow property, so guard access here.
-                    if ('castShadow' in mesh) {
-                        mesh.castShadow = true;
-                    }
-
-                    mesh.position.set(playerData.x, playerData.y, playerData.z);
-                    
-                    remotePlayers.set(playerData.sessionId, {
-                        id: playerData.sessionId,
-                        x: playerData.x,
-                        y: playerData.y,
-                        z: playerData.z,
-                        mesh
-                    });
-                    
-                    console.log(`Created remote player: ${playerData.sessionId}`);
-                    
-                    if (currentScene) {
-                        currentScene.add(mesh);
-                    }
+                    return;
                 } else {
                     const remotePlayer = remotePlayers.get(playerData.sessionId);
                     remotePlayer.x = playerData.x;
@@ -131,6 +104,10 @@ export function initNetworking(getLocalPlayerMeshArg, setObstaclesFnArg) {
                     remotePlayer.z = playerData.z;
                     if (remotePlayer.mesh) {
                         remotePlayer.mesh.position.set(playerData.x, playerData.y, playerData.z);
+                        if (playerData.dirX !== undefined && playerData.dirZ !== undefined) {
+                            const angle = Math.atan2(playerData.dirZ, playerData.dirX);
+                            remotePlayer.mesh.rotation.y = -angle - Math.PI / 2;
+                        }
                     }
                 }
             });
@@ -139,6 +116,68 @@ export function initNetworking(getLocalPlayerMeshArg, setObstaclesFnArg) {
                 if (!currentPlayerIds.has(sessionId) && data.mesh && data.mesh.parent) {
                     data.mesh.parent.remove(data.mesh);
                     remotePlayers.delete(sessionId);
+                }
+            }
+        });
+        
+        // Handle bullet updates from server
+        room.onMessage('bullets', (data) => {
+            const bulletMeshes = [];
+            
+            data.bullets.forEach((bulletData) => {
+                let bulletEntry = bullets.get(bulletData.id);
+                
+                if (!bulletEntry) {
+                    // Create new bullet mesh
+                    const geometry = new THREE.SphereGeometry(0.3, 8, 8);
+                    const material = new THREE.MeshStandardMaterial({ 
+                        color: 0xffff00,
+                        emissive: 0xff8800,
+                        emissiveIntensity: 0.5
+                    });
+                    const mesh = new THREE.Mesh(geometry, material);
+                    mesh.position.set(bulletData.x, bulletData.y, bulletData.z);
+                    mesh.castShadow = true;
+                    
+                    bulletEntry = {
+                        id: bulletData.id,
+                        mesh,
+                        x: bulletData.x,
+                        y: bulletData.y,
+                        z: bulletData.z,
+                        dirX: bulletData.dirX,
+                        dirZ: bulletData.dirZ
+                    };
+                    
+                    bullets.set(bulletData.id, bulletEntry);
+                    
+                    if (currentScene) {
+                        currentScene.add(mesh);
+                    }
+                }
+                
+                // Update bullet position
+                bulletEntry.x = bulletData.x;
+                bulletEntry.y = bulletData.y;
+                bulletEntry.z = bulletData.z;
+                bulletEntry.dirX = bulletData.dirX;
+                bulletEntry.dirZ = bulletData.dirZ;
+                
+                if (bulletEntry.mesh) {
+                    bulletEntry.mesh.position.set(bulletData.x, bulletData.y, bulletData.z);
+                    // Rotate bullet to face direction
+                    const angle = Math.atan2(bulletData.dirZ, bulletData.dirX);
+                    bulletEntry.mesh.rotation.y = -angle;
+                }
+                
+                bulletMeshes.push(bulletData.id);
+            });
+            
+            // Remove bullets that are no longer in the update
+            for (const [bulletId, bulletEntry] of bullets) {
+                if (!bulletMeshes.includes(bulletId) && bulletEntry.mesh && bulletEntry.mesh.parent) {
+                    bulletEntry.mesh.parent.remove(bulletEntry.mesh);
+                    bullets.delete(bulletId);
                 }
             }
         });
@@ -208,6 +247,10 @@ export function initNetworking(getLocalPlayerMeshArg, setObstaclesFnArg) {
         getPlayerId: () => playerId,
         isConnected: () => connected,
         getVisibleRadius: () => visibleRadius,
+        fireBullet: (dirX, dirZ) => {
+            if (!connected || !room) return;
+            room.send('fire-bullet', { dirX, dirZ });
+        },
         loadRemotePlayerModel: async (modelUrl) => {
             try {
                 const { loadAnimatedModel } = await import('./three.js');

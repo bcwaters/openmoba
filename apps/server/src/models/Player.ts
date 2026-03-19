@@ -9,4 +9,6 @@ export interface Player {
   speed: number; // movement speed
   connected: boolean; // connection or activity status
   teamId?: string; // team or faction placeholder
+  dirX?: number; // movement direction X (-1 to 1)
+  dirZ?: number; // movement direction Z (-1 to 1)
 }

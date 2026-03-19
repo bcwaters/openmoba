@@ -162,7 +162,7 @@ export function initThree() {
     const aspect = window.innerWidth / window.innerHeight;
     const viewSize = 100;
     camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 1000);
-    camera.position.set(0, 150, 100);
+    camera.position.set(0, 60, 60);
     camera.lookAt(0, 0, 0);
     
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -188,7 +188,7 @@ export function initThree() {
     playerRoot.position.set(0, 0.5, 0);
     playerRoot.userData = { id: 'local-player' };
 
-    const playerGeometry = new THREE.SphereGeometry(1.5, 16, 16);
+    const playerGeometry = new THREE.SphereGeometry(4.5, 16, 16);
     const playerMaterial = new THREE.MeshStandardMaterial({ color: 0x00ff88 });
     const placeholder = new THREE.Mesh(playerGeometry, playerMaterial);
     placeholder.castShadow = true;
@@ -199,7 +199,7 @@ export function initThree() {
     playerMesh = playerRoot;
     scene.add(playerMesh);
     
-    const targetGeometry = new THREE.RingGeometry(1.5, 2.0, 16);
+    const targetGeometry = new THREE.RingGeometry(0.5, 1.0, 16);
     const targetMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00, side: THREE.DoubleSide });
     const targetMesh = new THREE.Mesh(targetGeometry, targetMaterial);
     targetMesh.rotation.x = -Math.PI / 2;
@@ -256,7 +256,7 @@ function onMouseWheel(event) {
     const newZ = camera.position.z + direction * camera.position.z * zoomSpeed;
     
     camera.position.y = Math.max(20, Math.min(300, newY));
-    camera.position.z = Math.max(20, Math.min(200, newZ));
+    camera.position.z = Math.max(-100, Math.min(200, newZ));
     camera.lookAt(0, 0, 0);
 }
 
@@ -293,7 +293,7 @@ function createMinimap() {
         cameraFollowsPlayer = false;
         
         camera.position.x = worldX;
-        camera.position.z = worldZ + 100;
+        camera.position.z = worldZ + 60;
         camera.lookAt(worldX, 0, worldZ);
         
         if (fogMesh) {
@@ -390,7 +390,7 @@ function createFogOfWar() {
         uniforms: {
             playerX: { value: 0 },
             playerZ: { value: 0 },
-            visibleRadius: { value: 100 },
+            visibleRadius: { value: 50 },
             fogColor: { value: new THREE.Color(0x000000) },
             fogOpacity: { value: 0.85 }
         },
