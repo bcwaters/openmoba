@@ -102,7 +102,8 @@ export function initNetworking(getLocalPlayerMeshArg, setObstaclesFnArg, setLoca
     setObstaclesFn = setObstaclesFnArg;
     setLocalPlayerModelFn = setLocalPlayerModelFnArg;
     
-    client = new ColyseusClient('ws://localhost:2567');
+    const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'ws://localhost:2567';
+    client = new ColyseusClient(SERVER_URL);
     
     client.joinOrCreate("openmoba", {}).then((joinedRoom) => {
         room = joinedRoom;
