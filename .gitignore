@@ -33,7 +33,7 @@ Thumbs.db
 # Three.js / assets
 assets/
 static/
-public/
+
 # if using webpack or similarwebpack.config.js
 vite.config.js
 rollup.config.js
