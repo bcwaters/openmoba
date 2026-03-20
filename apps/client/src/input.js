@@ -10,6 +10,7 @@ let targetMesh = null;
 let raycaster = new THREE.Raycaster();
 let mouse = new THREE.Vector2();
 let sendFireBulletFn = null;
+let cursorWorldPos = new THREE.Vector3();
 
 export function initInput(getPlayerMeshFn, getCameraFn, getTargetMeshFn, fireBulletFn) {
     playerMesh = getPlayerMeshFn();
@@ -57,14 +58,17 @@ export function initInput(getPlayerMeshFn, getCameraFn, getTargetMeshFn, fireBul
         update: (deltaTime, sendMovementIntentFn) => {
             if (!playerMesh || !camera) return;
             
+            // Always update cursor world position for firing direction
+            raycaster.setFromCamera(mouse, camera);
+            const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+            const intersectPoint = new THREE.Vector3();
+            raycaster.ray.intersectPlane(plane, intersectPoint);
+            if (!isNaN(intersectPoint.x) && !isNaN(intersectPoint.z)) {
+                cursorWorldPos.copy(intersectPoint);
+            }
+            
             // Handle click-to-move
             if (isMouseDown) {
-                raycaster.setFromCamera(mouse, camera);
-                
-                const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-                const intersectPoint = new THREE.Vector3();
-                raycaster.ray.intersectPlane(plane, intersectPoint);
-                
                 if (!isNaN(intersectPoint.x) && !isNaN(intersectPoint.z)) {
                     // Calculate direction to target
                     const dx = intersectPoint.x - playerMesh.position.x;
@@ -105,6 +109,7 @@ export function initInput(getPlayerMeshFn, getCameraFn, getTargetMeshFn, fireBul
                 // Send movement intent to server
                 sendMovementIntentFn(targetX, pos.y, targetZ);
             }
-        }
+        },
+        getCursorWorldPos: () => cursorWorldPos
     };
 }

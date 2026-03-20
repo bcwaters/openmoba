@@ -11,4 +11,5 @@ export interface Bullet {
   ownerId: string; // player who fired
   createdAt: number;
   team: Team;
+  projectileDamage: number;
 }

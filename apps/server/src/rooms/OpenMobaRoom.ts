@@ -1,6 +1,6 @@
 import { Client, Room } from "colyseus";
 import { MovementIntent } from "../messages/MovementIntent";
-import { Player, Team } from "../models/Player";
+import { Player, Team, PLAYER_TYPE_CONFIG } from "../models/Player";
 import { Bullet } from "../models/Bullet";
 import { MAP_BOUNDS, SPAWN_POSITIONS, OBSTACLES } from "../constants/map";
 import { VisionService } from "../vision/vision.service";
@@ -54,24 +54,37 @@ export class OpenMobaRoom extends Room {
       ? { x: -80, y: 0, z: -80 }  // top left
       : { x: 80, y: 0, z: 80 };   // bottom right
     
-    // Create player entity
+    // Create player entity with type-specific configuration
     const team: Team = playerType === 'wizard' ? 'red' : 'blue';
+    const config = PLAYER_TYPE_CONFIG[playerType];
     const player: Player = {
       id: client.sessionId,
       x: spawnPos.x,
       y: spawnPos.y, // ground level
       z: spawnPos.z,
-      speed: 15.0, // units per second
+      speed: config.moveSpeed, // units per second
       connected: true,
       teamId: "unassigned", // placeholder
-      fireRate: 1.0, // projectiles per second
+      fireRate: config.fireRate,
       playerType,
       team,
-      health: 100
+      health: config.health,
+      projectileSize: config.projectileSize,
+      projectileDamage: config.projectileDamage,
+      projectileSpeed: config.projectileSpeed,
+      moveSpeed: config.moveSpeed,
+      visibilityRadius: config.visibilityRadius,
+      clipSize: config.clipSize,
+      reloadTime: config.reloadTime,
+      currentAmmo: config.clipSize,
+      isReloading: false,
+      spawnX: spawnPos.x,
+      spawnY: spawnPos.y,
+      spawnZ: spawnPos.z
     };
     
     this.players.set(client.sessionId, player);
-    console.log(`Player ${client.sessionId} spawned at`, spawnPos);
+    console.log(`Player ${client.sessionId} (${playerType}) spawned at`, spawnPos, 'with', config);
   }
 
   public onLeave(client: Client): void {
@@ -125,9 +138,30 @@ export class OpenMobaRoom extends Room {
     const now = Date.now();
     const minFireInterval = 1000 / player.fireRate;
     if (player.lastFiredAt && now - player.lastFiredAt < minFireInterval) {
-      return; // Still on cooldown
+      return; // Still on cooldown or reloading
     }
+    
+    // Check if reloading
+    if (player.currentAmmo < 0) {
+      return; // Still reloading
+    }
+    
+    // Check ammo
+    if (player.currentAmmo <= 0) {
+      return; // No ammo
+    }
+    
+    // Fire bullet
+    player.currentAmmo--;
     player.lastFiredAt = now;
+    
+    // Start reload if out of ammo
+    if (player.currentAmmo <= 0) {
+      player.currentAmmo = -1;
+      player.lastFiredAt = now + (player.reloadTime * 1000);
+      player.isReloading = true;
+      console.log(`[RELOAD] Player ${client.sessionId} started reload.`);
+    }
     
     // Use player's movement direction or default to facing right
     const dirX = message.dirX ?? player.dirX ?? 1;
@@ -142,18 +176,19 @@ export class OpenMobaRoom extends Room {
     const bullet: Bullet = {
       id: bulletId,
       x: player.x,
-      y: 3,
+      y: 9,
       z: player.z,
       dirX: nx,
       dirZ: nz,
-      speed: player.speed * 2, // twice player speed
+      speed: player.projectileSpeed,
       ownerId: client.sessionId,
       createdAt: Date.now(),
-      team: player.team
+      team: player.team,
+      projectileDamage: player.projectileDamage
     };
     
     this.bullets.set(bulletId, bullet);
-    console.log(`Player ${client.sessionId} fired bullet ${bulletId} in direction (${nx.toFixed(2)}, ${nz.toFixed(2)})`);
+    console.log(`Player ${client.sessionId} fired bullet ${bulletId} (damage: ${player.projectileDamage}) in direction (${nx.toFixed(2)}, ${nz.toFixed(2)})`);
   }
 
   private startSimulation(): void {
@@ -165,6 +200,16 @@ export class OpenMobaRoom extends Room {
 
   private updateSimulation(): void {
     const deltaTime = this.TICK_RATE / 1000; // Convert to seconds
+    const now = Date.now();
+    
+    // Check reload completion for all players
+    for (const [, player] of this.players.entries()) {
+      if (player.currentAmmo < 0 && player.lastFiredAt <= now) {
+        player.currentAmmo = player.clipSize;
+        player.isReloading = false;
+        console.log(`[RELOAD] Player ${player.id} reload complete. Ammo: ${player.currentAmmo}`);
+      }
+    }
     
     // Update player list for collision detection
     CollisionService.setPlayers(this.players);
@@ -293,8 +338,20 @@ export class OpenMobaRoom extends Room {
           const hitPlayer = this.players.get(hitPlayerId);
           
           if (hitPlayer && hitPlayer.team !== bullet.team) {
-            hitPlayer.health = Math.max(0, hitPlayer.health - 10);
-            console.log(`[BULLET] ${bulletId} hit player ${hitPlayerId} (${hitPlayer.team}) for 10 damage. Health: ${hitPlayer.health}`);
+            hitPlayer.health = Math.max(0, hitPlayer.health - bullet.projectileDamage);
+            console.log(`[BULLET] ${bulletId} hit player ${hitPlayerId} (${hitPlayer.team}) for ${bullet.projectileDamage} damage. Health: ${hitPlayer.health}`);
+            
+            if (hitPlayer.health <= 0) {
+              const config = PLAYER_TYPE_CONFIG[hitPlayer.playerType];
+              hitPlayer.x = hitPlayer.spawnX;
+              hitPlayer.y = hitPlayer.spawnY;
+              hitPlayer.z = hitPlayer.spawnZ;
+              hitPlayer.health = config.health;
+              hitPlayer.targetX = undefined;
+              hitPlayer.targetY = undefined;
+              hitPlayer.targetZ = undefined;
+              console.log(`[RESPAWN] Player ${hitPlayerId} respawned at (${hitPlayer.spawnX}, ${hitPlayer.spawnZ})`);
+            }
           }
         } else {
           console.log(`[BULLET] ${bulletId} hit ${obstacleId}`);
@@ -402,7 +459,10 @@ export class OpenMobaRoom extends Room {
             z: otherPlayer.z,
             connected: otherPlayer.connected,
             playerType: otherPlayer.playerType,
-            health: otherPlayer.health
+            health: otherPlayer.health,
+            projectileSize: otherPlayer.projectileSize,
+            currentAmmo: otherPlayer.currentAmmo,
+            isReloading: otherPlayer.isReloading
           };
         }
 
@@ -416,17 +476,20 @@ export class OpenMobaRoom extends Room {
             dirX: otherPlayer.dirX ?? 0,
             dirZ: otherPlayer.dirZ ?? 0,
             playerType: otherPlayer.playerType,
-            health: otherPlayer.health
+            health: otherPlayer.health,
+            projectileSize: otherPlayer.projectileSize,
+            currentAmmo: otherPlayer.currentAmmo,
+            isReloading: otherPlayer.isReloading
           };
         }
 
         return null;
-      }).filter((player): player is { sessionId: string; x: number; y: number; z: number; connected: boolean; dirX?: number; dirZ?: number; playerType: string; health: number } => 
+      }).filter((player): player is { sessionId: string; x: number; y: number; z: number; connected: boolean; dirX?: number; dirZ?: number; playerType: string; health: number; projectileSize: number; currentAmmo: number; isReloading: boolean } => 
                 player !== null);
 
       client.send("player-positions", { 
         players: filteredPlayersState, 
-        visibleRadius: 50.0,
+        visibleRadius: player.visibilityRadius,
         obstacles: OBSTACLES
       });
     });

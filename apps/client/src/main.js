@@ -1,5 +1,6 @@
+import './styles.css';
 import { initThree, loadObjModel } from './three.js';
-import { initNetworking, createHealthBar } from './networking.js';
+import { initNetworking, createHealthBar, createAmmoBar } from './networking.js';
 import { initInput } from './input.js';
 import * as THREE from 'three';
 
@@ -33,8 +34,12 @@ async function setLocalPlayerModel(playerType, onHealthBarCreated) {
         const healthBar = createHealthBar(100, parentScale);
         playerModel.add(healthBar);
         
+        const clipSize = playerType === 'wizard' ? 5 : 15;
+        const ammoBar = createAmmoBar(clipSize, parentScale);
+        playerModel.add(ammoBar);
+        
         if (onHealthBarCreated) {
-            onHealthBarCreated(healthBar);
+            onHealthBarCreated(healthBar, ammoBar, clipSize);
         }
         
         three.setPlayerVisual(playerModel);
@@ -51,9 +56,13 @@ const input = initInput(
     () => {
         const mesh = three.getPlayerMesh();
         if (mesh) {
-            const dirX = -Math.sin(mesh.rotation.y);
-            const dirZ = -Math.cos(mesh.rotation.y);
-            networking.fireBullet(dirX, dirZ);
+            const cursorPos = input.getCursorWorldPos();
+            const dirX = cursorPos.x - mesh.position.x;
+            const dirZ = cursorPos.z - mesh.position.z;
+            const length = Math.sqrt(dirX * dirX + dirZ * dirZ);
+            if (length > 0) {
+                networking.fireBullet(dirX / length, dirZ / length);
+            }
         }
     }
 );

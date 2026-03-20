@@ -15,7 +15,12 @@ let setObstaclesFn = null;
 let setLocalPlayerModelFn = null;
 let currentScene = null;
 let localHealthBar = null;
+let localAmmoBar = null;
 let localPlayerHealth = 100;
+let localProjectileSize = 3;
+let localClipSize = 15;
+let localCurrentAmmo = 15;
+let localIsReloading = false;
 // TODO: visibleRadius should be authoritative from server - refactor to remove hardcoded value
 let visibleRadius = 50.0;
 
@@ -23,6 +28,7 @@ const INTENT_THROTTLE_MS = 100;
 
 function createHealthBar(health, parentScale = 1) {
     const group = new THREE.Group();
+    group.userData.parentScale = parentScale;
     const segments = Math.max(1, Math.floor(health / 10));
     const squareSize = 1 / parentScale;
     const spacing = 0.2 / parentScale;
@@ -40,9 +46,10 @@ function createHealthBar(health, parentScale = 1) {
     return group;
 }
 
-function updateHealthBar(healthBar, health, parentScale = 1) {
+function updateHealthBar(healthBar, health) {
     if (!healthBar) return;
     
+    const parentScale = healthBar.userData.parentScale || 1;
     const segments = Math.max(1, Math.floor(health / 10));
     const squareSize = 1 / parentScale;
     const spacing = 0.2 / parentScale;
@@ -52,6 +59,39 @@ function updateHealthBar(healthBar, health, parentScale = 1) {
         if (child.visible) {
             child.position.x = i * (squareSize + spacing) - (10 * (squareSize + spacing)) / 2 + squareSize / 2;
         }
+    });
+}
+
+function createAmmoBar(clipSize, parentScale = 1) {
+    const group = new THREE.Group();
+    group.userData.parentScale = parentScale;
+    group.userData.clipSize = clipSize;
+    const squareSize = 1 / parentScale;
+    const spacing = 0.2 / parentScale;
+    
+    for (let i = 0; i < clipSize; i++) {
+        const geometry = new THREE.BoxGeometry(squareSize, squareSize, squareSize);
+        const material = new THREE.MeshStandardMaterial({ color: 0xffff00 });
+        const square = new THREE.Mesh(geometry, material);
+        square.position.x = i * (squareSize + spacing) - (clipSize * (squareSize + spacing)) / 2 + squareSize / 2;
+        square.position.y = 26 / parentScale;
+        square.visible = true;
+        group.add(square);
+    }
+    
+    return group;
+}
+
+function updateAmmoBar(ammoBar, currentAmmo, clipSize, isReloading) {
+    if (!ammoBar) return;
+    
+    const parentScale = ammoBar.userData.parentScale || 1;
+    const squareSize = 1 / parentScale;
+    const spacing = 0.2 / parentScale;
+    
+    ammoBar.children.forEach((child, i) => {
+        child.visible = i < clipSize;
+        child.material.color.setHex(isReloading ? 0x666666 : (i < currentAmmo ? 0xffff00 : 0x333333));
     });
 }
 let lastIntentTime = 0;
@@ -108,16 +148,31 @@ export function initNetworking(getLocalPlayerMeshArg, setObstaclesFnArg, setLoca
                         localPlayerType = playerData.playerType;
                         if (!localPlayerModelSet && setLocalPlayerModelFn) {
                             localPlayerModelSet = true;
-                            setLocalPlayerModelFn(playerData.playerType, (healthBar) => {
+                            setLocalPlayerModelFn(playerData.playerType, (healthBar, ammoBar, clipSize) => {
                                 localHealthBar = healthBar;
+                                localAmmoBar = ammoBar;
+                                localClipSize = clipSize;
+                                localCurrentAmmo = clipSize;
                             });
                         }
                     }
                     if (playerData.health !== undefined) {
                         localPlayerHealth = playerData.health;
                     }
+                    if (playerData.projectileSize !== undefined) {
+                        localProjectileSize = playerData.projectileSize;
+                    }
+                    if (playerData.currentAmmo !== undefined) {
+                        localCurrentAmmo = Math.max(0, playerData.currentAmmo);
+                    }
+                    if (playerData.isReloading !== undefined) {
+                        localIsReloading = playerData.isReloading;
+                    }
                     if (playerData.health !== undefined && localHealthBar) {
                         updateHealthBar(localHealthBar, playerData.health);
+                    }
+                    if (localAmmoBar) {
+                        updateAmmoBar(localAmmoBar, localCurrentAmmo, localClipSize, localIsReloading);
                     }
                     return;
                 }
@@ -149,7 +204,12 @@ export function initNetworking(getLocalPlayerMeshArg, setObstaclesFnArg, setLoca
                             mesh: model,
                             playerType: playerData.playerType,
                             health: playerData.health ?? 100,
-                            healthBar: null
+                            healthBar: null,
+                            ammoBar: null,
+                            projectileSize: playerData.projectileSize ?? 3,
+                            currentAmmo: playerData.currentAmmo ?? 15,
+                            clipSize: playerData.playerType === 'wizard' ? 5 : 15,
+                            isReloading: playerData.isReloading ?? false
                         });
                         
                         console.log(`Created remote ${playerData.playerType} player: ${playerData.sessionId}`);
@@ -159,6 +219,11 @@ export function initNetworking(getLocalPlayerMeshArg, setObstaclesFnArg, setLoca
                             const healthBar = createHealthBar(playerData.health ?? 100, parentScale);
                             model.add(healthBar);
                             remotePlayers.get(playerData.sessionId).healthBar = healthBar;
+                            
+                            const clipSize = playerData.playerType === 'wizard' ? 5 : 15;
+                            const ammoBar = createAmmoBar(clipSize, parentScale);
+                            model.add(ammoBar);
+                            remotePlayers.get(playerData.sessionId).ammoBar = ammoBar;
                             remotePlayers.get(playerData.sessionId).parentScale = parentScale;
                             
                             model.position.set(playerData.x, playerData.y, playerData.z);
@@ -182,7 +247,12 @@ export function initNetworking(getLocalPlayerMeshArg, setObstaclesFnArg, setLoca
                     }
                     if (playerData.health !== undefined && playerData.health !== remotePlayer.health) {
                         remotePlayer.health = playerData.health;
-                        updateHealthBar(remotePlayer.healthBar, playerData.health, remotePlayer.parentScale || 1);
+                        updateHealthBar(remotePlayer.healthBar, playerData.health);
+                    }
+                    if (playerData.currentAmmo !== undefined || playerData.isReloading !== undefined) {
+                        remotePlayer.currentAmmo = Math.max(0, playerData.currentAmmo ?? remotePlayer.currentAmmo);
+                        remotePlayer.isReloading = playerData.isReloading ?? remotePlayer.isReloading;
+                        updateAmmoBar(remotePlayer.ammoBar, remotePlayer.currentAmmo, remotePlayer.clipSize, remotePlayer.isReloading);
                     }
                 }
             });
@@ -203,8 +273,19 @@ export function initNetworking(getLocalPlayerMeshArg, setObstaclesFnArg, setLoca
                 let bulletEntry = bullets.get(bulletData.id);
                 
                 if (!bulletEntry) {
+                    // Determine projectile size based on owner
+                    let projectileSize = 3;
+                    if (bulletData.ownerId === playerId) {
+                        projectileSize = localProjectileSize;
+                    } else {
+                        const owner = remotePlayers.get(bulletData.ownerId);
+                        if (owner) {
+                            projectileSize = owner.projectileSize ?? 3;
+                        }
+                    }
+                    
                     // Create new bullet mesh
-                    const geometry = new THREE.SphereGeometry(0.9, 8, 8);
+                    const geometry = new THREE.SphereGeometry(projectileSize * 0.3, 8, 8);
                     const material = new THREE.MeshStandardMaterial({ 
                         color: 0xffff00,
                         emissive: 0xff8800,
@@ -338,4 +419,4 @@ export function initNetworking(getLocalPlayerMeshArg, setObstaclesFnArg, setLoca
     };
 }
 
-export { createHealthBar, updateHealthBar };
+export { createHealthBar, updateHealthBar, createAmmoBar, updateAmmoBar };
