@@ -1,26 +1,66 @@
 import * as THREE from 'three';
-import { Client as ColyseusClient } from 'colyseus.js';
-import { loadObjModel } from './three.js';
+import { Client as ColyseusClient } from "colyseus.js";
+import { loadObjModel } from "./three.js";
 
 let client;
 let room;
 let connected = false;
 let playerId = null;
+let localPlayerType = null;
+let localPlayerModelSet = false;
 let remotePlayers = new Map();
 let bullets = new Map();
 let getLocalPlayerMesh = null;
 let setObstaclesFn = null;
+let setLocalPlayerModelFn = null;
 let currentScene = null;
+let localHealthBar = null;
+let localPlayerHealth = 100;
 // TODO: visibleRadius should be authoritative from server - refactor to remove hardcoded value
 let visibleRadius = 50.0;
 
 const INTENT_THROTTLE_MS = 100;
+
+function createHealthBar(health, parentScale = 1) {
+    const group = new THREE.Group();
+    const segments = Math.max(1, Math.floor(health / 10));
+    const squareSize = 1 / parentScale;
+    const spacing = 0.2 / parentScale;
+    
+    for (let i = 0; i < 10; i++) {
+        const geometry = new THREE.BoxGeometry(squareSize, squareSize, squareSize);
+        const material = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
+        const square = new THREE.Mesh(geometry, material);
+        square.position.x = i * (squareSize + spacing) - (10 * (squareSize + spacing)) / 2 + squareSize / 2;
+        square.position.y = 24 / parentScale;
+        square.visible = i < segments;
+        group.add(square);
+    }
+    
+    return group;
+}
+
+function updateHealthBar(healthBar, health, parentScale = 1) {
+    if (!healthBar) return;
+    
+    const segments = Math.max(1, Math.floor(health / 10));
+    const squareSize = 1 / parentScale;
+    const spacing = 0.2 / parentScale;
+    
+    healthBar.children.forEach((child, i) => {
+        child.visible = i < segments;
+        if (child.visible) {
+            child.position.x = i * (squareSize + spacing) - (10 * (squareSize + spacing)) / 2 + squareSize / 2;
+        }
+    });
+}
 let lastIntentTime = 0;
 let pendingIntent = null;
 
-export function initNetworking(getLocalPlayerMeshArg, setObstaclesFnArg) {
+export function initNetworking(getLocalPlayerMeshArg, setObstaclesFnArg, setLocalPlayerModelFnArg) {
     getLocalPlayerMesh = getLocalPlayerMeshArg;
     setObstaclesFn = setObstaclesFnArg;
+    setLocalPlayerModelFn = setLocalPlayerModelFnArg;
     
     client = new ColyseusClient('ws://localhost:2567');
     
@@ -64,15 +104,37 @@ export function initNetworking(getLocalPlayerMeshArg, setObstaclesFnArg) {
                     if (mesh) {
                         mesh.position.set(playerData.x, playerData.y, playerData.z);
                     }
+                    if (playerData.playerType && playerData.playerType !== localPlayerType) {
+                        localPlayerType = playerData.playerType;
+                        if (!localPlayerModelSet && setLocalPlayerModelFn) {
+                            localPlayerModelSet = true;
+                            setLocalPlayerModelFn(playerData.playerType, (healthBar) => {
+                                localHealthBar = healthBar;
+                            });
+                        }
+                    }
+                    if (playerData.health !== undefined) {
+                        localPlayerHealth = playerData.health;
+                    }
+                    if (playerData.health !== undefined && localHealthBar) {
+                        updateHealthBar(localHealthBar, playerData.health);
+                    }
                     return;
                 }
                 
                 if (!remotePlayers.has(playerData.sessionId)) {
                     try {
-                        const wizardModel = await loadObjModel('/models/Wizard.obj');
-                        wizardModel.rotation.y = Math.PI;
-                        wizardModel.scale.set(5.46, 5.46, 5.46);
-                        wizardModel.traverse((child) => {
+                        const modelUrl = playerData.playerType === 'wizard' ? '/models/Wizard.obj' : '/models/Robot.obj';
+                        const model = await loadObjModel(modelUrl);
+                        model.rotation.y = Math.PI;
+                        
+                        if (playerData.playerType === 'wizard') {
+                            model.scale.set(5.46, 5.46, 5.46);
+                        } else {
+                            model.scale.set(3, 3, 3);
+                        }
+                        
+                        model.traverse((child) => {
                             if (child.isMesh) {
                                 child.castShadow = true;
                                 child.receiveShadow = true;
@@ -84,17 +146,26 @@ export function initNetworking(getLocalPlayerMeshArg, setObstaclesFnArg) {
                             x: playerData.x,
                             y: playerData.y,
                             z: playerData.z,
-                            mesh: wizardModel
+                            mesh: model,
+                            playerType: playerData.playerType,
+                            health: playerData.health ?? 100,
+                            healthBar: null
                         });
                         
-                        console.log(`Created remote player: ${playerData.sessionId}`);
+                        console.log(`Created remote ${playerData.playerType} player: ${playerData.sessionId}`);
                         
                         if (currentScene) {
-                            wizardModel.position.set(playerData.x, playerData.y, playerData.z);
-                            currentScene.add(wizardModel);
+                            const parentScale = playerData.playerType === 'wizard' ? 5.46 : 3;
+                            const healthBar = createHealthBar(playerData.health ?? 100, parentScale);
+                            model.add(healthBar);
+                            remotePlayers.get(playerData.sessionId).healthBar = healthBar;
+                            remotePlayers.get(playerData.sessionId).parentScale = parentScale;
+                            
+                            model.position.set(playerData.x, playerData.y, playerData.z);
+                            currentScene.add(model);
                         }
                     } catch (e) {
-                        console.error('Failed to load wizard model:', e);
+                        console.error('Failed to load remote player model:', e);
                     }
                     return;
                 } else {
@@ -108,6 +179,10 @@ export function initNetworking(getLocalPlayerMeshArg, setObstaclesFnArg) {
                             const angle = Math.atan2(playerData.dirZ, playerData.dirX);
                             remotePlayer.mesh.rotation.y = -angle - Math.PI / 2;
                         }
+                    }
+                    if (playerData.health !== undefined && playerData.health !== remotePlayer.health) {
+                        remotePlayer.health = playerData.health;
+                        updateHealthBar(remotePlayer.healthBar, playerData.health, remotePlayer.parentScale || 1);
                     }
                 }
             });
@@ -129,7 +204,7 @@ export function initNetworking(getLocalPlayerMeshArg, setObstaclesFnArg) {
                 
                 if (!bulletEntry) {
                     // Create new bullet mesh
-                    const geometry = new THREE.SphereGeometry(0.3, 8, 8);
+                    const geometry = new THREE.SphereGeometry(0.9, 8, 8);
                     const material = new THREE.MeshStandardMaterial({ 
                         color: 0xffff00,
                         emissive: 0xff8800,
@@ -262,3 +337,5 @@ export function initNetworking(getLocalPlayerMeshArg, setObstaclesFnArg) {
         }
     };
 }
+
+export { createHealthBar, updateHealthBar };

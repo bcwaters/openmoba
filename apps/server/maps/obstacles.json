@@ -1,0 +1,44 @@
+[
+  {
+    "id": "obstacle-0",
+    "x": -65,
+    "z": -49.5,
+    "width": 70,
+    "height": 31
+  },
+  {
+    "id": "obstacle-1",
+    "x": -7,
+    "z": -59,
+    "width": 20,
+    "height": 6
+  },
+  {
+    "id": "obstacle-2",
+    "x": 36.5,
+    "z": -19.5,
+    "width": 15,
+    "height": 15
+  },
+  {
+    "id": "obstacle-3",
+    "x": -40.5,
+    "z": -1.5,
+    "width": 15,
+    "height": 13
+  },
+  {
+    "id": "obstacle-4",
+    "x": 68,
+    "z": 35.5,
+    "width": 64,
+    "height": 43
+  },
+  {
+    "id": "obstacle-5",
+    "x": 9,
+    "z": 50,
+    "width": 26,
+    "height": 4
+  }
+]

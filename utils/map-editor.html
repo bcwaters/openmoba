@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Map Grid Editor</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+    h1 { margin-bottom: 16px; }
+    .controls {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    button, select {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button {
+      background: #4a4a6a;
+      color: #fff;
+    }
+    button:hover { background: #5a5a7a; }
+    button.active { background: #6366f1; }
+    select { background: #4a4a6a; color: #fff; }
+    .grid-container {
+      overflow: auto;
+      max-width: 90vw;
+      max-height: 70vh;
+      border: 2px solid #4a4a6a;
+      border-radius: 8px;
+    }
+    table { border-collapse: collapse; }
+    td {
+      width: 6px;
+      height: 6px;
+      cursor: crosshair;
+    }
+    td.open { background: #2d2d44; }
+    td.blocked { background: #6366f1; }
+    td:hover { filter: brightness(1.3); }
+    .info {
+      margin-top: 16px;
+      font-size: 14px;
+      color: #888;
+    }
+    .legend {
+      display: flex;
+      gap: 20px;
+      margin-top: 8px;
+    }
+    .legend span { display: flex; align-items: center; gap: 6px; }
+    .legend .swatch {
+      width: 16px;
+      height: 16px;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Map Grid Editor</h1>
+  
+  <div class="controls">
+    <button id="drawBtn" class="active">Draw</button>
+    <button id="eraseBtn">Erase</button>
+    <button id="toggleBtn">Toggle</button>
+    <select id="brushSize">
+      <option value="1">Brush: 1</option>
+      <option value="3">Brush: 3</option>
+      <option value="5">Brush: 5</option>
+      <option value="7">Brush: 7</option>
+    </select>
+    <button id="clearBtn">Clear All</button>
+    <button id="loadBtn">Load Original</button>
+    <button id="exportBtn">Export JSON</button>
+    <button id="mergeBtn">Merge & Export</button>
+  </div>
+  
+  <div class="grid-container">
+    <table id="grid"></table>
+  </div>
+  
+  <div class="info">
+    <span id="stats">Grid: 200x200</span>
+    <div class="legend">
+      <span><div class="swatch" style="background:#2d2d44"></div> Open</span>
+      <span><div class="swatch" style="background:#6366f1"></div> Blocked</span>
+    </div>
+  </div>
+
+  <script>
+    const GRID_SIZE = 200;
+    const CELL_SIZE = 6;
+    
+    let grid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(false));
+    let mode = 'draw';
+    let brushSize = 1;
+    let isMouseDown = false;
+    
+    const TABLE = document.getElementById('grid');
+    const STATS = document.getElementById('stats');
+    
+    const drawBtn = document.getElementById('drawBtn');
+    const eraseBtn = document.getElementById('eraseBtn');
+    const toggleBtn = document.getElementById('toggleBtn');
+    const brushSelect = document.getElementById('brushSize');
+    const clearBtn = document.getElementById('clearBtn');
+    const loadBtn = document.getElementById('loadBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const mergeBtn = document.getElementById('mergeBtn');
+
+    function loadOriginalGrid() {
+      const cells = TABLE.querySelectorAll('td');
+      cells.forEach(cell => {
+        const row = parseInt(cell.dataset.row);
+        const col = parseInt(cell.dataset.col);
+        cell.className = cell.dataset.original;
+      });
+      grid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(false));
+      TABLE.querySelectorAll('td').forEach(cell => {
+        if (cell.dataset.original === 'blocked') {
+          const row = parseInt(cell.dataset.row);
+          const col = parseInt(cell.dataset.col);
+          grid[row][col] = true;
+        }
+      });
+      updateStats();
+    }
+
+    function renderGrid() {
+      TABLE.innerHTML = '';
+      for (let row = 0; row < GRID_SIZE; row++) {
+        const tr = document.createElement('tr');
+        for (let col = 0; col < GRID_SIZE; col++) {
+          const td = document.createElement('td');
+          td.dataset.row = row;
+          td.dataset.col = col;
+          const isBlocked = isBlockedCell(col, row);
+          td.dataset.original = isBlocked ? 'blocked' : 'open';
+          td.className = grid[row][col] ? 'blocked' : 'open';
+          tr.appendChild(td);
+        }
+        TABLE.appendChild(tr);
+      }
+      updateStats();
+    }
+
+    function isBlockedCell(col, row) {
+      const obstacles = [
+        { x: 0, z: 100, width: 200, height: 10 },
+        { x: 0, z: -100, width: 200, height: 10 },
+        { x: 100, z: 0, width: 10, height: 200 },
+        { x: -100, z: 0, width: 10, height: 200 },
+        { x: -50, z: -20, width: 60, height: 8 },
+        { x: 30, z: -20, width: 40, height: 8 },
+        { x: -70, z: 20, width: 40, height: 8 },
+        { x: 0, z: 30, width: 50, height: 8 },
+        { x: 60, z: 40, width: 50, height: 8 },
+        { x: -40, z: 60, width: 60, height: 8 },
+        { x: 20, z: 70, width: 40, height: 8 },
+        { x: -80, z: -50, width: 30, height: 8 },
+        { x: 70, z: -60, width: 40, height: 8 },
+        { x: -20, z: 0, width: 8, height: 40 },
+        { x: 40, z: -40, width: 8, height: 50 },
+        { x: -60, z: -40, width: 8, height: 30 },
+        { x: 70, z: 0, width: 8, height: 40 },
+        { x: -80, z: 50, width: 8, height: 40 },
+        { x: -30, z: -70, width: 8, height: 40 },
+        { x: 50, z: 60, width: 8, height: 30 },
+      ];
+      
+      for (const obs of obstacles) {
+        const halfW = obs.width / 2;
+        const halfH = obs.height / 2;
+        const worldX = col - 100 + 0.5;
+        const worldZ = row - 100 + 0.5;
+        if (
+          worldX >= obs.x - halfW && worldX <= obs.x + halfW &&
+          worldZ >= obs.z - halfH && worldZ <= obs.z + halfH
+        ) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function paintCell(col, row) {
+      const half = Math.floor(brushSize / 2);
+      console.log(`brushSize=${brushSize}, half=${half}, col=${col}, row=${row}`);
+      for (let dy = -half; dy <= half; dy++) {
+        for (let dx = -half; dx <= half; dx++) {
+          console.log(`  painting: col=${col + dx}, row=${row + dy}`);
+          const r = row + dy;
+          const c = col + dx;
+          if (r >= 0 && r < GRID_SIZE && c >= 0 && c < GRID_SIZE) {
+            if (mode === 'draw') grid[r][c] = true;
+            else if (mode === 'erase') grid[r][c] = false;
+            else grid[r][c] = !grid[r][c];
+            
+            const td = TABLE.querySelector(`td[data-row="${r}"][data-col="${c}"]`);
+            if (td) td.className = grid[r][c] ? 'blocked' : 'open';
+          }
+        }
+      }
+      updateStats();
+    }
+
+    function updateStats() {
+      const blocked = grid.flat().filter(c => c).length;
+      STATS.textContent = `Grid: ${GRID_SIZE}x${GRID_SIZE} | Blocked: ${blocked} cells`;
+    }
+
+    function setMode(m) {
+      mode = m;
+      drawBtn.classList.toggle('active', m === 'draw');
+      eraseBtn.classList.toggle('active', m === 'erase');
+      toggleBtn.classList.toggle('active', m === 'toggle');
+    }
+
+    TABLE.addEventListener('mousedown', e => {
+      if (e.target.tagName === 'TD') {
+        isMouseDown = true;
+        paintCell(parseInt(e.target.dataset.col), parseInt(e.target.dataset.row));
+      }
+    });
+
+    TABLE.addEventListener('mousemove', e => {
+      if (isMouseDown && e.target.tagName === 'TD') {
+        paintCell(parseInt(e.target.dataset.col), parseInt(e.target.dataset.row));
+      }
+    });
+
+    document.addEventListener('mouseup', () => isMouseDown = false);
+
+    drawBtn.addEventListener('click', () => { setMode('draw'); console.log('Mode: draw'); });
+    eraseBtn.addEventListener('click', () => { setMode('erase'); console.log('Mode: erase'); });
+    toggleBtn.addEventListener('click', () => { setMode('toggle'); console.log('Mode: toggle'); });
+    brushSelect.addEventListener('change', e => {
+      const newSize = parseInt(e.target.value);
+      console.log('Brush size changed from', brushSize, 'to', newSize);
+      brushSize = newSize;
+    });
+    
+    clearBtn.addEventListener('click', () => {
+      grid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(false));
+      TABLE.querySelectorAll('td').forEach(td => td.className = 'open');
+      updateStats();
+    });
+
+    loadBtn.addEventListener('click', loadOriginalGrid);
+
+    exportBtn.addEventListener('click', () => {
+      const json = JSON.stringify(grid, null, 2);
+      download(json, 'grid.json', 'application/json');
+    });
+
+    mergeBtn.addEventListener('click', () => {
+      const obstacles = gridToObstacles(grid);
+      const json = JSON.stringify(obstacles, null, 2);
+      download(json, 'obstacles.json', 'application/json');
+    });
+
+    function gridToObstacles(grid) {
+      const visited = grid.map(row => row.map(() => false));
+      const obstacles = [];
+
+      for (let row = 0; row < GRID_SIZE; row++) {
+        for (let col = 0; col < GRID_SIZE; col++) {
+          if (grid[row][col] && !visited[row][col]) {
+            const region = floodFill(grid, visited, col, row);
+            const bounds = getBounds(region);
+            obstacles.push({
+              id: `obstacle-${obstacles.length}`,
+              x: bounds.centerX,
+              z: bounds.centerZ,
+              width: bounds.width,
+              height: bounds.height,
+            });
+          }
+        }
+      }
+
+      return mergeObstacles(obstacles);
+    }
+
+    function floodFill(grid, visited, startCol, startRow) {
+      const region = [];
+      const stack = [{ col: startCol, row: startRow }];
+
+      while (stack.length > 0) {
+        const { col, row } = stack.pop();
+        if (col < 0 || col >= GRID_SIZE || row < 0 || row >= GRID_SIZE ||
+            visited[row][col] || !grid[row][col]) continue;
+        visited[row][col] = true;
+        region.push({ col, row });
+        stack.push({ col: col + 1, row }, { col: col - 1, row },
+                   { col, row: row + 1 }, { col, row: row - 1 });
+      }
+      return region;
+    }
+
+    function getBounds(region) {
+      let minCol = Infinity, maxCol = -Infinity;
+      let minRow = Infinity, maxRow = -Infinity;
+      for (const cell of region) {
+        minCol = Math.min(minCol, cell.col);
+        maxCol = Math.max(maxCol, cell.col);
+        minRow = Math.min(minRow, cell.row);
+        maxRow = Math.max(maxRow, cell.row);
+      }
+      return {
+        centerX: (minCol + maxCol + 1) / 2 - 100,
+        centerZ: (minRow + maxRow + 1) / 2 - 100,
+        width: maxCol - minCol + 1,
+        height: maxRow - minRow + 1,
+      };
+    }
+
+    function mergeObstacles(obstacles) {
+      if (obstacles.length <= 1) return obstacles;
+      let merged = true;
+      let result = [...obstacles];
+
+      while (merged) {
+        merged = false;
+        const newResult = [];
+        for (const obs of result) {
+          if (!obs) continue;
+          for (let i = 0; i < newResult.length; i++) {
+            if (!newResult[i]) continue;
+            const mergedObs = tryMergePair(obs, newResult[i]);
+            if (mergedObs) {
+              newResult[i] = mergedObs;
+              obs.id = "";
+              merged = true;
+              break;
+            }
+          }
+          if (obs.id) newResult.push(obs);
+        }
+        result = newResult;
+      }
+      return result.map((obs, i) => ({ ...obs, id: `obstacle-${i}` }));
+    }
+
+    function tryMergePair(a, b) {
+      const t = 0.1;
+      if (Math.abs(a.z - b.z) < t && Math.abs(a.height - b.height) < t) {
+        const minX = Math.min(a.x - a.width / 2, b.x - b.width / 2);
+        const maxX = Math.max(a.x + a.width / 2, b.x + b.width / 2);
+        if (Math.abs((a.x + b.x) / 2 - (minX + maxX) / 2) < t) {
+          return { id: a.id, x: (minX + maxX) / 2, z: a.z, width: maxX - minX, height: a.height };
+        }
+      }
+      if (Math.abs(a.x - b.x) < t && Math.abs(a.width - b.width) < t) {
+        const minZ = Math.min(a.z - a.height / 2, b.z - b.height / 2);
+        const maxZ = Math.max(a.z + a.height / 2, b.z + b.height / 2);
+        if (Math.abs((a.z + b.z) / 2 - (minZ + maxZ) / 2) < t) {
+          return { id: a.id, x: a.x, z: (minZ + maxZ) / 2, width: a.width, height: maxZ - minZ };
+        }
+      }
+      return null;
+    }
+
+    function download(content, filename, type) {
+      const blob = new Blob([content], { type });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    renderGrid();
+  </script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 import { Client, Room } from "colyseus";
 import { MovementIntent } from "../messages/MovementIntent";
-import { Player } from "../models/Player";
+import { Player, Team } from "../models/Player";
 import { Bullet } from "../models/Bullet";
 import { MAP_BOUNDS, SPAWN_POSITIONS, OBSTACLES } from "../constants/map";
 import { VisionService } from "../vision/vision.service";
@@ -45,11 +45,17 @@ export class OpenMobaRoom extends Room {
   }
 
   public onJoin(client: Client): void {
-    // Assign a spawn position
-    const spawnIndex = this.players.size % SPAWN_POSITIONS.length;
-    const spawnPos = SPAWN_POSITIONS[spawnIndex];
+    // Alternate wizard (top left) and dude (bottom right)
+    const playerIndex = this.players.size;
+    const playerType: 'wizard' | 'dude' = playerIndex % 2 === 0 ? 'wizard' : 'dude';
+    
+    // Top left for wizard, bottom right for dude
+    const spawnPos = playerType === 'wizard' 
+      ? { x: -80, y: 0, z: -80 }  // top left
+      : { x: 80, y: 0, z: 80 };   // bottom right
     
     // Create player entity
+    const team: Team = playerType === 'wizard' ? 'red' : 'blue';
     const player: Player = {
       id: client.sessionId,
       x: spawnPos.x,
@@ -57,7 +63,11 @@ export class OpenMobaRoom extends Room {
       z: spawnPos.z,
       speed: 15.0, // units per second
       connected: true,
-      teamId: "unassigned" // placeholder
+      teamId: "unassigned", // placeholder
+      fireRate: 1.0, // projectiles per second
+      playerType,
+      team,
+      health: 100
     };
     
     this.players.set(client.sessionId, player);
@@ -111,6 +121,14 @@ export class OpenMobaRoom extends Room {
     const player = this.players.get(client.sessionId);
     if (!player) return;
     
+    // Check fire rate cooldown
+    const now = Date.now();
+    const minFireInterval = 1000 / player.fireRate;
+    if (player.lastFiredAt && now - player.lastFiredAt < minFireInterval) {
+      return; // Still on cooldown
+    }
+    player.lastFiredAt = now;
+    
     // Use player's movement direction or default to facing right
     const dirX = message.dirX ?? player.dirX ?? 1;
     const dirZ = message.dirZ ?? player.dirZ ?? 0;
@@ -130,7 +148,8 @@ export class OpenMobaRoom extends Room {
       dirZ: nz,
       speed: player.speed * 2, // twice player speed
       ownerId: client.sessionId,
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      team: player.team
     };
     
     this.bullets.set(bulletId, bullet);
@@ -267,7 +286,20 @@ export class OpenMobaRoom extends Room {
       // Check bullet vs obstacles and players
       const collisionResult = CollisionService.checkBulletPosition(bullet, bullet.ownerId);
       if (collisionResult.collides) {
-        console.log(`[BULLET] ${bulletId} hit ${collisionResult.obstacleId}`);
+        const obstacleId = collisionResult.obstacleId;
+        
+        if (obstacleId?.startsWith('player-')) {
+          const hitPlayerId = obstacleId.replace('player-', '');
+          const hitPlayer = this.players.get(hitPlayerId);
+          
+          if (hitPlayer && hitPlayer.team !== bullet.team) {
+            hitPlayer.health = Math.max(0, hitPlayer.health - 10);
+            console.log(`[BULLET] ${bulletId} hit player ${hitPlayerId} (${hitPlayer.team}) for 10 damage. Health: ${hitPlayer.health}`);
+          }
+        } else {
+          console.log(`[BULLET] ${bulletId} hit ${obstacleId}`);
+        }
+        
         toRemove.push(bulletId);
       }
     }
@@ -368,7 +400,9 @@ export class OpenMobaRoom extends Room {
             x: otherPlayer.x,
             y: otherPlayer.y,
             z: otherPlayer.z,
-            connected: otherPlayer.connected
+            connected: otherPlayer.connected,
+            playerType: otherPlayer.playerType,
+            health: otherPlayer.health
           };
         }
 
@@ -380,12 +414,14 @@ export class OpenMobaRoom extends Room {
             z: otherPlayer.z,
             connected: otherPlayer.connected,
             dirX: otherPlayer.dirX ?? 0,
-            dirZ: otherPlayer.dirZ ?? 0
+            dirZ: otherPlayer.dirZ ?? 0,
+            playerType: otherPlayer.playerType,
+            health: otherPlayer.health
           };
         }
 
         return null;
-      }).filter((player): player is { sessionId: string; x: number; y: number; z: number; connected: boolean; dirX: number; dirZ: number } => 
+      }).filter((player): player is { sessionId: string; x: number; y: number; z: number; connected: boolean; dirX?: number; dirZ?: number; playerType: string; health: number } => 
                 player !== null);
 
       client.send("player-positions", { 

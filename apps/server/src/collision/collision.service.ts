@@ -50,7 +50,6 @@ export class CollisionService {
       );
       
       if (result.collides) {
-        console.log(`[SPAWN COLLISION] ${player.id} spawning on player ${otherId} at (${player.x.toFixed(1)}, ${player.z.toFixed(1)})`);
         return {
           ...result,
           obstacleId: `player-${otherId}`
@@ -109,7 +108,7 @@ export class CollisionService {
   }
   
   public static checkBulletPosition(bullet: { x: number; z: number }, ownerId?: string): CollisionResult {
-    const bulletRadius = 0.3; // smaller than player
+    const bulletRadius = 0.9; // tripled from 0.3
     
     // Check against all obstacles
     for (const obstacle of this.obstacles) {

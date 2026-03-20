@@ -1,3 +1,5 @@
+import { Team } from "./Player";
+
 export interface Bullet {
   id: string;
   x: number;
@@ -8,4 +10,5 @@ export interface Bullet {
   speed: number;
   ownerId: string; // player who fired
   createdAt: number;
+  team: Team;
 }

@@ -1,3 +1,6 @@
+export type PlayerType = 'wizard' | 'dude';
+export type Team = 'red' | 'blue';
+
 export interface Player {
   id: string; // player/session identifier
   x: number; // current position
@@ -11,4 +14,9 @@ export interface Player {
   teamId?: string; // team or faction placeholder
   dirX?: number; // movement direction X (-1 to 1)
   dirZ?: number; // movement direction Z (-1 to 1)
+  fireRate: number; // projectiles per second
+  lastFiredAt?: number; // timestamp of last shot
+  playerType: PlayerType;
+  team: Team;
+  health: number;
 }
