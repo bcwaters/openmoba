@@ -36,4 +36,5 @@ export interface Player {
   spawnX: number;
   spawnY: number;
   spawnZ: number;
+  lastActivityAt: number;
 }

@@ -45,26 +45,21 @@ export class OpenMobaRoom extends Room {
   }
 
   public onJoin(client: Client): void {
-    // Alternate wizard (top left) and dude (bottom right)
     const playerIndex = this.players.size;
     const playerType: 'wizard' | 'dude' = playerIndex % 2 === 0 ? 'wizard' : 'dude';
     
-    // Top left for wizard, bottom right for dude
-    const spawnPos = playerType === 'wizard' 
-      ? { x: -80, y: 0, z: -80 }  // top left
-      : { x: 80, y: 0, z: 80 };   // bottom right
+    const spawnPos = this.findValidSpawnPosition(playerType);
     
-    // Create player entity with type-specific configuration
     const team: Team = playerType === 'wizard' ? 'red' : 'blue';
     const config = PLAYER_TYPE_CONFIG[playerType];
     const player: Player = {
       id: client.sessionId,
       x: spawnPos.x,
-      y: spawnPos.y, // ground level
+      y: spawnPos.y,
       z: spawnPos.z,
-      speed: config.moveSpeed, // units per second
+      speed: config.moveSpeed,
       connected: true,
-      teamId: "unassigned", // placeholder
+      teamId: "unassigned",
       fireRate: config.fireRate,
       playerType,
       team,
@@ -80,11 +75,44 @@ export class OpenMobaRoom extends Room {
       isReloading: false,
       spawnX: spawnPos.x,
       spawnY: spawnPos.y,
-      spawnZ: spawnPos.z
+      spawnZ: spawnPos.z,
+      lastActivityAt: Date.now()
     };
     
     this.players.set(client.sessionId, player);
+    CollisionService.setPlayers(this.players);
     console.log(`Player ${client.sessionId} (${playerType}) spawned at`, spawnPos, 'with', config);
+  }
+
+  private findValidSpawnPosition(playerType: 'wizard' | 'dude'): { x: number; y: number; z: number } {
+    const preferredPositions = playerType === 'wizard'
+      ? [{ x: -80, y: 0, z: -80 }, { x: -60, y: 0, z: -60 }, { x: -80, y: 0, z: -60 }]
+      : [{ x: 80, y: 0, z: 80 }, { x: 60, y: 0, z: 60 }, { x: 80, y: 0, z: 60 }];
+
+    const candidatePositions = [...preferredPositions, ...SPAWN_POSITIONS];
+
+    for (const pos of candidatePositions) {
+      const tempPlayer: Partial<Player> = { id: 'temp', x: pos.x, z: pos.z };
+      const collision = CollisionService.checkPlayerPosition(tempPlayer as Player, 'temp');
+      if (!collision.collides) {
+        return pos;
+      }
+    }
+
+    const maxAttempts = 100;
+    for (let i = 0; i < maxAttempts; i++) {
+      const x = MAP_BOUNDS.minX + 10 + Math.random() * (MAP_BOUNDS.maxX - MAP_BOUNDS.minX - 20);
+      const z = MAP_BOUNDS.minZ + 10 + Math.random() * (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ - 20);
+      const tempPlayer: Partial<Player> = { id: 'temp', x, z };
+      const collision = CollisionService.checkPlayerPosition(tempPlayer as Player, 'temp');
+      if (!collision.collides) {
+        console.log(`[SPAWN] Found random valid position (${x.toFixed(1)}, ${z.toFixed(1)}) after ${i + 1} attempts`);
+        return { x, y: 0, z };
+      }
+    }
+
+    console.warn('[SPAWN] Could not find valid spawn position, using default');
+    return playerType === 'wizard' ? { x: -80, y: 0, z: -80 } : { x: 80, y: 0, z: 80 };
   }
 
   public onLeave(client: Client): void {
@@ -124,8 +152,9 @@ export class OpenMobaRoom extends Room {
     
     // Set movement target
     player.targetX = validatedTarget.x;
-    player.targetY = validatedTarget.y; // Should be 0
+    player.targetY = validatedTarget.y;
     player.targetZ = validatedTarget.z !== undefined ? validatedTarget.z : 0;
+    player.lastActivityAt = Date.now();
     
     console.log(`Player ${client.sessionId} moving to`, validatedTarget);
   }
@@ -188,6 +217,7 @@ export class OpenMobaRoom extends Room {
     };
     
     this.bullets.set(bulletId, bullet);
+    player.lastActivityAt = now;
     console.log(`Player ${client.sessionId} fired bullet ${bulletId} (damage: ${player.projectileDamage}) in direction (${nx.toFixed(2)}, ${nz.toFixed(2)})`);
   }
 
@@ -201,6 +231,7 @@ export class OpenMobaRoom extends Room {
   private updateSimulation(): void {
     const deltaTime = this.TICK_RATE / 1000; // Convert to seconds
     const now = Date.now();
+    const IDLE_TIMEOUT_MS = 60000;
     
     // Check reload completion for all players
     for (const [, player] of this.players.entries()) {
@@ -208,6 +239,14 @@ export class OpenMobaRoom extends Room {
         player.currentAmmo = player.clipSize;
         player.isReloading = false;
         console.log(`[RELOAD] Player ${player.id} reload complete. Ammo: ${player.currentAmmo}`);
+      }
+    }
+    
+    // Check for idle players
+    for (const [sessionId, player] of this.players.entries()) {
+      if (now - player.lastActivityAt > IDLE_TIMEOUT_MS) {
+        console.log(`[IDLE] Player ${sessionId} removed for inactivity (${((now - player.lastActivityAt) / 1000).toFixed(0)}s idle)`);
+        this.players.delete(sessionId);
       }
     }
     
@@ -343,14 +382,18 @@ export class OpenMobaRoom extends Room {
             
             if (hitPlayer.health <= 0) {
               const config = PLAYER_TYPE_CONFIG[hitPlayer.playerType];
-              hitPlayer.x = hitPlayer.spawnX;
-              hitPlayer.y = hitPlayer.spawnY;
-              hitPlayer.z = hitPlayer.spawnZ;
+              const newSpawnPos = this.findValidSpawnPosition(hitPlayer.playerType);
+              hitPlayer.x = newSpawnPos.x;
+              hitPlayer.y = newSpawnPos.y;
+              hitPlayer.z = newSpawnPos.z;
+              hitPlayer.spawnX = newSpawnPos.x;
+              hitPlayer.spawnY = newSpawnPos.y;
+              hitPlayer.spawnZ = newSpawnPos.z;
               hitPlayer.health = config.health;
               hitPlayer.targetX = undefined;
               hitPlayer.targetY = undefined;
               hitPlayer.targetZ = undefined;
-              console.log(`[RESPAWN] Player ${hitPlayerId} respawned at (${hitPlayer.spawnX}, ${hitPlayer.spawnZ})`);
+              console.log(`[RESPAWN] Player ${hitPlayerId} respawned at (${newSpawnPos.x}, ${newSpawnPos.z})`);
             }
           }
         } else {

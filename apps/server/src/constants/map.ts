@@ -55,8 +55,7 @@ const DEFAULT_SPAWN_POSITIONS = [
 ];
 
 function loadObstaclesFromFile(): Obstacle[] | null {
-  const mapFile = process.env.MAP_FILE;
-  if (!mapFile) return null;
+  const mapFile = process.env.MAP_FILE || 'maps/obstacles.json';
 
   try {
     const absolutePath = path.resolve(process.cwd(), mapFile);

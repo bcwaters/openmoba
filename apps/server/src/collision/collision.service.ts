@@ -30,8 +30,7 @@ export class CollisionService {
       );
       
       if (result.collides) {
-        console.log(`[SPAWN COLLISION] ${player.id} spawning inside obstacle ${obstacle.id} at (${player.x.toFixed(1)}, ${player.z.toFixed(1)})`);
-        return {
+          return {
           ...result,
           obstacleId: obstacle.id
         };
